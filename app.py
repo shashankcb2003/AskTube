@@ -1,5 +1,8 @@
 import streamlit as st
 import time
+import yt_dlp
+import requests
+
 from youtube_transcript_api import YouTubeTranscriptApi
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
@@ -8,7 +11,6 @@ from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnableParallel, RunnablePassthrough, RunnableLambda
 from langchain_core.output_parsers import StrOutputParser
-from pytube import YouTube
 
 # ==============================
 # 🎨 Page Config
@@ -27,7 +29,7 @@ st.title("🎥 AskTube")
 st.caption("Chat with any YouTube video using AI 🚀")
 
 # ==============================
-# 📌 Sidebar (Input)
+# 📌 Sidebar
 # ==============================
 with st.sidebar:
     st.header("🎥 Load Video")
@@ -45,6 +47,56 @@ def extract_video_id(url):
     return url
 
 # ==============================
+# 🎬 Get Video Title
+# ==============================
+def get_video_title(url):
+    try:
+        ydl_opts = {"quiet": True}
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            return info.get("title", "YouTube Video")
+    except:
+        return "YouTube Video"
+
+# ==============================
+# 📄 Get Transcript (with fallback)
+# ==============================
+def get_transcript(video_id, video_url):
+
+    # Try youtube-transcript-api
+    try:
+        ytt_api = YouTubeTranscriptApi()
+        transcript_data = ytt_api.fetch(video_id)
+        return " ".join(chunk.text for chunk in transcript_data)
+    except:
+        pass
+
+    # Fallback: yt-dlp subtitles
+    try:
+        ydl_opts = {
+            "quiet": True,
+            "skip_download": True,
+            "writesubtitles": True,
+            "writeautomaticsub": True,
+            "subtitleslangs": ["en"],
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(video_url, download=False)
+
+            subtitles = info.get("subtitles") or info.get("automatic_captions")
+
+            if subtitles and "en" in subtitles:
+                sub_url = subtitles["en"][0]["url"]
+                res = requests.get(sub_url)
+                return res.text
+
+    except:
+        pass
+
+    return None
+
+# ==============================
 # 🚀 Process Video
 # ==============================
 if process_btn and video_url:
@@ -53,27 +105,19 @@ if process_btn and video_url:
     try:
         progress = st.progress(0, text="Starting...")
 
-        # 🎬 Video info
+        # 🎬 Title + Thumbnail
         progress.progress(10, text="Fetching video info...")
-        import yt_dlp
-
-        def get_video_title(url):
-            ydl_opts = {"quiet": True}
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                return info.get("title", "Unknown Title")
-
         video_title = get_video_title(video_url)
-
         st.markdown(f"### 🎬 {video_title}")
-        thumbnail_url = f"https://img.youtube.com/vi/{video_id}/0.jpg"
-        st.image(thumbnail_url)
+        st.image(f"https://img.youtube.com/vi/{video_id}/0.jpg")
 
         # 📄 Transcript
         progress.progress(30, text="Fetching transcript...")
-        ytt_api = YouTubeTranscriptApi()
-        transcript_data = ytt_api.fetch(video_id)
-        transcript = " ".join(chunk.text for chunk in transcript_data)
+        transcript = get_transcript(video_id, video_url)
+
+        if not transcript:
+            st.error("❌ Could not fetch transcript for this video.")
+            st.stop()
 
         # ✂️ Split
         progress.progress(50, text="Splitting text...")
@@ -84,15 +128,12 @@ if process_btn and video_url:
         progress.progress(70, text="Creating embeddings...")
         embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         vector_store = FAISS.from_documents(chunks, embeddings)
-
         retriever = vector_store.as_retriever(search_kwargs={"k": 4})
 
         # 🤖 LLM
         progress.progress(85, text="Loading AI model...")
-        groq_api_key = st.secrets["GROQ_API_KEY"]
-
         llm = ChatGroq(
-            groq_api_key=groq_api_key,
+            groq_api_key=st.secrets["GROQ_API_KEY"],
             model="llama-3.1-8b-instant",
             temperature=0.2
         )
@@ -130,7 +171,7 @@ Question: {question}
         st.error(f"Error: {e}")
 
 # ==============================
-# 💬 Chat UI + History
+# 💬 Chat UI
 # ==============================
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -139,39 +180,29 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# 💬 Input
 if "chain" in st.session_state:
     user_input = st.chat_input("Message AskTube...")
 
     if user_input:
-        # Save user message
-        st.session_state.messages.append({
-            "role": "user",
-            "content": user_input
-        })
+        st.session_state.messages.append({"role": "user", "content": user_input})
 
         with st.chat_message("user"):
             st.markdown(user_input)
 
-        # 🤖 AI response with typing effect
         with st.chat_message("assistant"):
-            message_placeholder = st.empty()
+            placeholder = st.empty()
             full_response = ""
 
             answer = st.session_state.chain.invoke(user_input)
 
             for word in answer.split():
                 full_response += word + " "
-                message_placeholder.markdown(full_response + "▌")
+                placeholder.markdown(full_response + "▌")
                 time.sleep(0.02)
 
-            message_placeholder.markdown(full_response)
+            placeholder.markdown(full_response)
 
-        # Save response
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": full_response
-        })
+        st.session_state.messages.append({"role": "assistant", "content": full_response})
 
 # ==============================
 # 🗑️ Clear Chat
