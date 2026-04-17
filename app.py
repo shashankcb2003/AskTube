@@ -89,8 +89,10 @@ if process_btn and video_url:
 
         # 🤖 LLM
         progress.progress(85, text="Loading AI model...")
+        groq_api_key = st.secrets["GROQ_API_KEY"]
+
         llm = ChatGroq(
-            groq_api_key = st.secrets["GROQ_API_KEY"]
+            groq_api_key=groq_api_key,
             model="llama-3.1-8b-instant",
             temperature=0.2
         )
