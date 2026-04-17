@@ -128,7 +128,7 @@ if process_btn and video_url:
         progress.progress(70, text="Creating embeddings...")
         embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         vector_store = FAISS.from_documents(chunks, embeddings)
-        retriever = vector_store.as_retriever(search_kwargs={"k": 4})
+        retriever = vector_store.as_retriever(search_kwargs={"k": 7})
 
         # 🤖 LLM
         progress.progress(85, text="Loading AI model...")
@@ -142,7 +142,7 @@ if process_btn and video_url:
         prompt = PromptTemplate(
             template="""
 Answer ONLY from context.
-If not found, say "I don't know".
+Try and say answer for the question.
 
 {context}
 Question: {question}
