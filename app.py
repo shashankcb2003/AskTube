@@ -142,7 +142,7 @@ if process_btn and video_url:
         prompt = PromptTemplate(
             template="""
 Answer ONLY from context.
-Try and say answer for the question.
+If not found, say "I don't know".
 
 {context}
 Question: {question}
