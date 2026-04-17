@@ -23,7 +23,6 @@
 # """, unsafe_allow_html=True)
 
 # # 🔑 Set API key
-# # os.environ["GROQ_API_KEY"] = "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"
 
 # st.title("🎥 AskTube")
 # st.caption("Chat with any YouTube video using AI 🚀")
